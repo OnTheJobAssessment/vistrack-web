@@ -6,7 +6,9 @@
  ******************************************************/
 const SUPABASE_URL = 'https://qzluybsuucqqoyetawjg.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF6bHV5YnN1dWNxcW95ZXRhd2pnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzIyOTQsImV4cCI6MjA5OTIwODI5NH0.u-SgQvCuBxVWkn6McoUfcPs5jV4F1r1Ots8hAGZkPww';
-const supabase = window.supabase.createClient(https://qzluybsuucqqoyetawjg.supabase.co, eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF6bHV5YnN1dWNxcW95ZXRhd2pnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzIyOTQsImV4cCI6MjA5OTIwODI5NH0.u-SgQvCuBxVWkn6McoUfcPs5jV4F1r1Ots8hAGZkPww);
+
+// 1. UBAH NAMA VARIABEL DI SINI
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /******************************************************
  * CACHE CONFIG
@@ -308,9 +310,10 @@ async function callServer(fnName, args, onSuccess, opts) {
  * FUNGSI-FUNGSI SUPABASE API
  ******************************************************/
 
+// 2. SELURUH PANGGILAN API DI BAWAH INI MENGGUNAKAN supabaseClient
 async function api_verifyLogin(email, password) {
   const passwordHash = await sha256(password.trim());
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from('teamleaders')
     .select('*')
     .ilike('email', email.trim())
@@ -334,7 +337,7 @@ async function api_getDashboardData(frontlinerName, filterDate, idTeamleader, is
   const startOfMonth = `${y}-${m}-01`;
   const endOfMonth = `${y}-${m}-31`;
 
-  let query = supabase.from('data_visit').select('*');
+  let query = supabaseClient.from('data_visit').select('*');
   if (!isSuperuser) query = query.eq('id_teamleader', idTeamleader);
   if (frontlinerName !== 'ALL') query = query.eq('frontliner_name', frontlinerName);
   
@@ -390,7 +393,7 @@ async function api_getDashboardData(frontlinerName, filterDate, idTeamleader, is
 }
 
 async function api_getMasterDataList(idTeamleader, isSuperuser) {
-  let flQuery = supabase.from('frontliners').select('*');
+  let flQuery = supabaseClient.from('frontliners').select('*');
   if (!isSuperuser) flQuery = flQuery.eq('id_teamleader', idTeamleader);
   const { data: flData } = await flQuery;
 
@@ -399,7 +402,7 @@ async function api_getMasterDataList(idTeamleader, isSuperuser) {
     flArray.push(['', r.id_frontliner, r.name, r.position, r.area, r.id_teamleader, r.tl_name, r.email]);
   });
 
-  let dmpQuery = supabase.from('DMP').select('*');
+  let dmpQuery = supabaseClient.from('DMP').select('*');
   if (!isSuperuser) dmpQuery = dmpQuery.eq('id_teamleader', idTeamleader);
   const { data: dmpData } = await dmpQuery;
 
@@ -415,7 +418,7 @@ async function api_getMasterDataList(idTeamleader, isSuperuser) {
 }
 
 async function api_processVerifikasi(rowIdx, idResp, p, statusToko, statusCheckout, a, c) {
-  const { error } = await supabase
+  const { error } = await supabaseClient
     .from('data_visit')
     .update({
       status_verif: 'Sudah Verifikasi',
@@ -431,7 +434,7 @@ async function api_processVerifikasi(rowIdx, idResp, p, statusToko, statusChecko
 }
 
 async function api_deleteKunjungan(idResp) {
-  const { error } = await supabase.from('data_visit').delete().eq('resp_id', idResp);
+  const { error } = await supabaseClient.from('data_visit').delete().eq('resp_id', idResp);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
@@ -443,18 +446,18 @@ async function api_saveDMP(values, isEdit, oldOutletId) {
     type_outlet: values[9], type_display: values[10], rayon: values[11], latlong: values[12]
   };
   const { error } = isEdit
-    ? await supabase.from('DMP').update(row).eq('outlet_id', oldOutletId)
-    : await supabase.from('DMP').insert(row);
+    ? await supabaseClient.from('DMP').update(row).eq('outlet_id', oldOutletId)
+    : await supabaseClient.from('DMP').insert(row);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
 async function api_deleteDMP(outletId) {
-  const { error } = await supabase.from('DMP').delete().eq('outlet_id', outletId);
+  const { error } = await supabaseClient.from('DMP').delete().eq('outlet_id', outletId);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
 async function api_getTeamleaderData() {
-  const { data, error } = await supabase.from('teamleaders').select('*');
+  const { data, error } = await supabaseClient.from('teamleaders').select('*');
   if (error) return { success: false, message: error.message };
   const formatted = data.map(r => ({
     rowIdx: r.id, email: r.email, idTL: r.id_teamleader, name: r.name, area: r.area
@@ -465,18 +468,18 @@ async function api_getTeamleaderData() {
 async function api_saveTeamleader(values, isEdit, id) {
   const row = { email: values[0], id_teamleader: values[1], name: values[2], area: values[3] };
   const { error } = isEdit 
-    ? await supabase.from('teamleaders').update(row).eq('id', id)
-    : await supabase.from('teamleaders').insert(row);
+    ? await supabaseClient.from('teamleaders').update(row).eq('id', id)
+    : await supabaseClient.from('teamleaders').insert(row);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
 async function api_deleteTeamleader(id) {
-  const { error } = await supabase.from('teamleaders').delete().eq('id', id);
+  const { error } = await supabaseClient.from('teamleaders').delete().eq('id', id);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
 async function api_getFrontlinerData(idTeamleader, isSuperuser) {
-  let query = supabase.from('frontliners').select('*');
+  let query = supabaseClient.from('frontliners').select('*');
   if (!isSuperuser) query = query.eq('id_teamleader', idTeamleader);
   const { data, error } = await query;
   if (error) return { success: false, message: error.message };
@@ -491,18 +494,18 @@ async function api_getFrontlinerData(idTeamleader, isSuperuser) {
 async function api_saveFrontliner(values, isEdit, id) {
   const row = { email: values[0], id_frontliner: values[1], name: values[2], position: values[3], area: values[4], id_teamleader: values[5], tl_name: values[6] };
   const { error } = isEdit 
-    ? await supabase.from('frontliners').update(row).eq('id', id)
-    : await supabase.from('frontliners').insert(row);
+    ? await supabaseClient.from('frontliners').update(row).eq('id', id)
+    : await supabaseClient.from('frontliners').insert(row);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
 async function api_deleteFrontliner(id) {
-  const { error } = await supabase.from('frontliners').delete().eq('id', id);
+  const { error } = await supabaseClient.from('frontliners').delete().eq('id', id);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
 async function api_getVerifikasiData(tg, fl, ry, idTeamleader, isSuperuser) {
-  let query = supabase.from('data_visit').select('*');
+  let query = supabaseClient.from('data_visit').select('*');
   if (!isSuperuser) query = query.eq('id_teamleader', idTeamleader);
   if (tg) query = query.eq('tanggal', tg);
   if (fl && fl !== 'ALL') query = query.eq('frontliner_name', fl);
@@ -524,7 +527,7 @@ async function api_getVerifikasiData(tg, fl, ry, idTeamleader, isSuperuser) {
 }
 
 async function api_getVisitDataFiltered(st, en, fl, idTeamleader, isSuperuser) {
-  let query = supabase.from('data_visit').select('*').gte('tanggal', st).lte('tanggal', en);
+  let query = supabaseClient.from('data_visit').select('*').gte('tanggal', st).lte('tanggal', en);
   if (!isSuperuser) query = query.eq('id_teamleader', idTeamleader);
   if (fl !== 'ALL') query = query.eq('frontliner_name', fl);
 
@@ -546,7 +549,7 @@ async function api_replaceDmpData(dmpUploadedData, currentIdTeamleader, currentI
     district: row[8], type_outlet: row[9], type_display: row[10], rayon: row[11], latlong: row[12]
   }));
   
-  const { error } = await supabase.from('DMP').upsert(rowsToInsert, { onConflict: 'outlet_id' });
+  const { error } = await supabaseClient.from('DMP').upsert(rowsToInsert, { onConflict: 'outlet_id' });
   return error ? { success: false, message: error.message } : { success: true };
 }
 
@@ -557,7 +560,7 @@ async function api_resolveMultipleDriveImages(arr) {
 }
 
 async function api_invokeEdgeFunction(fnName, args) {
-  const { data, error } = await supabase.functions.invoke(fnName, { body: { args } });
+  const { data, error } = await supabaseClient.functions.invoke(fnName, { body: { args } });
   if (error) throw new Error(error.message);
   return data;
 }
@@ -565,10 +568,10 @@ async function api_invokeEdgeFunction(fnName, args) {
 async function api_getJEMPreviewData(year, month, flId, idTL, isSuper) {
   return await api_invokeEdgeFunction('getJEMPreviewData', arguments);
 }
+
 async function api_getRKMData(year, month, flId, idTL, isSuper) {
   return await api_invokeEdgeFunction('getRKMData', arguments);
 }
-
 /******************************************************
  * UI & CHART HELPERS
  ******************************************************/
