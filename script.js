@@ -221,6 +221,21 @@ async function sha256(text) {
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+/******************************************************
+ * UTILITY: Generate Password Hash (untuk diisi manual ke
+ * kolom password_hash di Supabase table `teamleaders`)
+ *
+ * Cara pakai: buka DevTools Console di halaman ini, lalu ketik:
+ *   await generatePasswordHash('passwordAsli')
+ * Copy hasilnya (64 karakter hex) ke kolom password_hash
+ * pada baris user yang sesuai di Supabase Table Editor.
+ ******************************************************/
+window.generatePasswordHash = async function (plainPassword) {
+  const hash = await sha256(String(plainPassword).trim());
+  console.log('Password hash:', hash);
+  return hash;
+};
+
 // Format Date Helper Pengganti Utilities.formatDate
 function formatDateJS(dateVal, format) {
   if (!dateVal) return '-';
@@ -313,14 +328,37 @@ async function callServer(fnName, args, onSuccess, opts) {
 // 2. SELURUH PANGGILAN API DI BAWAH INI MENGGUNAKAN supabaseClient
 async function api_verifyLogin(email, password) {
   const passwordHash = await sha256(password.trim());
+
+  // maybeSingle() dipakai (bukan single()) supaya tidak melempar error keras
+  // kalau baris tidak ketemu atau ada duplikat email — kita tangani manual di bawah.
   const { data, error } = await supabaseClient
     .from('teamleaders')
     .select('*')
     .ilike('email', email.trim())
-    .single();
+    .maybeSingle();
 
-  if (error || !data) return { success: false, message: 'Email tidak ditemukan.' };
-  if (data.password_hash !== passwordHash) return { success: false, message: 'Password salah.' };
+  if (error) {
+    console.error('[verifyLogin] Supabase error:', error);
+    return { success: false, message: 'Terjadi kesalahan saat menghubungi server.' };
+  }
+  if (!data) return { success: false, message: 'Email tidak ditemukan.' };
+
+  // Normalisasi kedua sisi (trim + lowercase) supaya hash tetap cocok
+  // walau ada spasi tersembunyi atau huruf besar/kecil berbeda saat hash
+  // di-input manual ke Supabase.
+  const storedHash   = String(data.password_hash || '').trim().toLowerCase();
+  const computedHash = passwordHash.trim().toLowerCase();
+
+  if (!storedHash) {
+    console.error('[verifyLogin] Kolom password_hash kosong/null untuk email:', email);
+    return { success: false, message: 'Akun ini belum memiliki password. Hubungi admin.' };
+  }
+
+  if (storedHash !== computedHash) {
+    // Log untuk debugging developer di console (tidak ditampilkan ke user)
+    console.warn('[verifyLogin] Hash tidak cocok.', { expected: storedHash, computed: computedHash });
+    return { success: false, message: 'Password salah.' };
+  }
 
   return {
     success: true,
