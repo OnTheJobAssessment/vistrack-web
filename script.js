@@ -146,6 +146,7 @@ function initTheme() {
  ******************************************************/
 let rawDMP        = [];
 let rawFL         = [];
+let rawFrontlinerData = [];
 let dmpMarkersMap = {};
 let map           = null;
 let markersLayer  = null;
@@ -325,6 +326,35 @@ async function callServer(fnName, args, onSuccess, opts) {
  * FUNGSI-FUNGSI SUPABASE API
  ******************************************************/
 
+// Kolom checkin_date di tabel data_visit disimpan sebagai TEXT format "M/D/YYYY"
+// (bukan tipe date, dan tanpa angka nol di depan). Karena itu filter tanggal
+// tidak bisa diandalkan lewat query .gte()/.lte() di Postgrest (perbandingan
+// string, bukan perbandingan tanggal beneran) — jadi kita ambil data lalu
+// filter tanggalnya di JavaScript.
+function parseVisitDate(text) {
+  if (!text) return null;
+  const d = new Date(text);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function sameDate(d1, d2) {
+  return d1 && d2 &&
+    d1.getFullYear() === d2.getFullYear() &&
+    d1.getMonth()    === d2.getMonth() &&
+    d1.getDate()      === d2.getDate();
+}
+
+function computeDuration(checkinTime, checkoutTime) {
+  if (!checkinTime || !checkoutTime) return '-';
+  const [h1, m1, s1] = checkinTime.split(':').map(Number);
+  const [h2, m2, s2] = checkoutTime.split(':').map(Number);
+  if ([h1, m1, s1, h2, m2, s2].some(v => isNaN(v))) return '-';
+  let diffSec = (h2 * 3600 + m2 * 60 + s2) - (h1 * 3600 + m1 * 60 + s1);
+  if (diffSec < 0) return '-';
+  const mins = Math.floor(diffSec / 60);
+  return mins >= 60 ? `${Math.floor(mins / 60)}j ${mins % 60}m` : `${mins}m`;
+}
+
 // 2. SELURUH PANGGILAN API DI BAWAH INI MENGGUNAKAN supabaseClient
 async function api_verifyLogin(email, password) {
   const inputPlain = password.trim();
@@ -372,20 +402,22 @@ async function api_verifyLogin(email, password) {
 }
 
 async function api_getDashboardData(frontlinerName, filterDate, idTeamleader, isSuperuser) {
-  const dObj = new Date(filterDate);
-  const y = dObj.getFullYear();
-  const m = String(dObj.getMonth() + 1).padStart(2, '0');
-  const startOfMonth = `${y}-${m}-01`;
-  const endOfMonth = `${y}-${m}-31`;
+  const target = new Date(filterDate);
+  const targetYear  = target.getFullYear();
+  const targetMonth = target.getMonth();
 
   let query = supabaseClient.from('data_visit').select('*');
   if (!isSuperuser) query = query.eq('id_teamleader', idTeamleader);
   if (frontlinerName !== 'ALL') query = query.eq('frontliner_name', frontlinerName);
-  
-  query = query.gte('tanggal', startOfMonth).lte('tanggal', endOfMonth);
 
-  const { data, error } = await query;
+  const { data: allData, error } = await query;
   if (error) return { success: false, message: error.message };
+
+  // Filter bulan/tahun di JS karena checkin_date adalah TEXT (format M/D/YYYY)
+  const data = (allData || []).filter(row => {
+    const d = parseVisitDate(row.checkin_date);
+    return d && d.getFullYear() === targetYear && d.getMonth() === targetMonth;
+  });
 
   let todayC = 0, todayClosed = 0, todayP = 0, todayNonP = 0;
   let monthC = data.length, monthP = 0;
@@ -394,15 +426,15 @@ async function api_getDashboardData(frontlinerName, filterDate, idTeamleader, is
   const verifStatsMap = {};
 
   data.forEach(row => {
-    const tgl = row.tanggal;
-    const isToday = (tgl === filterDate);
+    const d = parseVisitDate(row.checkin_date);
+    const isToday = sameDate(d, target);
     const planoStat = row.status_planogram || '';
     const isPlano = planoStat.toLowerCase().includes('planogram') && 
                     !planoStat.toLowerCase().includes('non') && 
                     !planoStat.toLowerCase().includes('tidak');
     
     if (isPlano) monthP++;
-    if (row.status_verif && row.status_verif.includes('Sudah')) totalVerified++;
+    if (row.status_verifikasi && row.status_verifikasi.includes('Sudah')) totalVerified++;
 
     if (isToday) {
       todayC++;
@@ -412,15 +444,15 @@ async function api_getDashboardData(frontlinerName, filterDate, idTeamleader, is
 
       detail.push({
         out: row.outlet_name, rayon: row.rayon, addr: row.outlet_address,
-        checkin: row.waktu_checkin, checkout: row.waktu_checkout,
-        duration: row.durasi, statusToko: row.status_toko, stat: row.status_planogram
+        checkin: row.checkin_time, checkout: row.checkout_time,
+        duration: row.duration || computeDuration(row.checkin_time, row.checkout_time), statusToko: row.status_toko, stat: row.status_planogram
       });
     }
 
     const fl = row.frontliner_name || 'Tanpa Nama';
     if (!verifStatsMap[fl]) verifStatsMap[fl] = { total: 0, verified: 0 };
     verifStatsMap[fl].total++;
-    if (row.status_verif && row.status_verif.includes('Sudah')) verifStatsMap[fl].verified++;
+    if (row.status_verifikasi && row.status_verifikasi.includes('Sudah')) verifStatsMap[fl].verified++;
   });
 
   const verifStats = Object.keys(verifStatsMap).map(k => ({
@@ -443,7 +475,7 @@ async function api_getMasterDataList(idTeamleader, isSuperuser) {
     flArray.push(['', r.id_frontliner, r.name, r.position, r.area, r.id_teamleader, r.tl_name, r.email]);
   });
 
-  let dmpQuery = supabaseClient.from('DMP').select('*');
+  let dmpQuery = supabaseClient.from('dmp').select('*');
   if (!isSuperuser) dmpQuery = dmpQuery.eq('id_teamleader', idTeamleader);
   const { data: dmpData } = await dmpQuery;
 
@@ -462,20 +494,20 @@ async function api_processVerifikasi(rowIdx, idResp, p, statusToko, statusChecko
   const { error } = await supabaseClient
     .from('data_visit')
     .update({
-      status_verif: 'Sudah Verifikasi',
+      status_verifikasi: 'Sudah Verifikasi',
       status_planogram: p,
       status_toko: statusToko,
       status_checkout: statusCheckout,
       status_add_display: a,
-      catatan_verifikator: c
+      remarks: c
     })
-    .eq('resp_id', idResp);
+    .eq('id_responses', idResp);
 
   return error ? { success: false, message: error.message } : { success: true };
 }
 
 async function api_deleteKunjungan(idResp) {
-  const { error } = await supabaseClient.from('data_visit').delete().eq('resp_id', idResp);
+  const { error } = await supabaseClient.from('data_visit').delete().eq('id_responses', idResp);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
@@ -487,13 +519,13 @@ async function api_saveDMP(values, isEdit, oldOutletId) {
     type_outlet: values[9], type_display: values[10], rayon: values[11], latlong: values[12]
   };
   const { error } = isEdit
-    ? await supabaseClient.from('DMP').update(row).eq('outlet_id', oldOutletId)
-    : await supabaseClient.from('DMP').insert(row);
+    ? await supabaseClient.from('dmp').update(row).eq('outlet_id', oldOutletId)
+    : await supabaseClient.from('dmp').insert(row);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
 async function api_deleteDMP(outletId) {
-  const { error } = await supabaseClient.from('DMP').delete().eq('outlet_id', outletId);
+  const { error } = await supabaseClient.from('dmp').delete().eq('outlet_id', outletId);
   return error ? { success: false, message: error.message } : { success: true };
 }
 
@@ -548,36 +580,52 @@ async function api_deleteFrontliner(id) {
 async function api_getVerifikasiData(tg, fl, ry, idTeamleader, isSuperuser) {
   let query = supabaseClient.from('data_visit').select('*');
   if (!isSuperuser) query = query.eq('id_teamleader', idTeamleader);
-  if (tg) query = query.eq('tanggal', tg);
   if (fl && fl !== 'ALL') query = query.eq('frontliner_name', fl);
   if (ry && ry !== 'ALL') query = query.eq('rayon', ry);
 
-  const { data, error } = await query;
+  const { data: allData, error } = await query;
   if (error) return { success: false, message: error.message };
+
+  // checkin_date adalah TEXT (format M/D/YYYY) jadi dicocokkan di JS, bukan di query
+  const targetDate = tg ? parseVisitDate(tg) : null;
+  const data = targetDate
+    ? allData.filter(r => sameDate(parseVisitDate(r.checkin_date), targetDate))
+    : allData;
 
   const formatted = data.map((r, i) => ({
     rowIdx: i,
-    idResp: r.resp_id, outlet: r.outlet_name, outletId: r.outlet_id,
-    frontliner: r.frontliner_name, rayon: r.rayon, statVerif: r.status_verif,
+    idResp: r.id_responses, outlet: r.outlet_name, outletId: r.outlet_id,
+    frontliner: r.frontliner_name, rayon: r.rayon, statVerif: r.status_verifikasi,
     statPlano: r.status_planogram, statusToko: r.status_toko, statusCheckout: r.status_checkout,
-    statAddDisp: r.status_add_display, statCheck: r.catatan_verifikator,
-    imgCheckin: r.img_checkin, imgCheckout: r.img_checkout, imgDisplay: r.img_display, 
-    imgAddDisplay: r.img_add_display, imgPosm: r.img_posm
+    statAddDisp: r.status_add_display, statCheck: r.remarks,
+    imgCheckin: r.checkin_image, imgCheckout: r.checkout_image, imgDisplay: r.display_image, 
+    imgAddDisplay: r.additional_display_image, imgPosm: r.posm_image
   }));
   return { success: true, data: formatted };
 }
 
 async function api_getVisitDataFiltered(st, en, fl, idTeamleader, isSuperuser) {
-  let query = supabaseClient.from('data_visit').select('*').gte('tanggal', st).lte('tanggal', en);
+  let query = supabaseClient.from('data_visit').select('*');
   if (!isSuperuser) query = query.eq('id_teamleader', idTeamleader);
   if (fl !== 'ALL') query = query.eq('frontliner_name', fl);
 
-  const { data, error } = await query;
+  const { data: allData, error } = await query;
   if (error) return { success: false, message: error.message };
+
+  // checkin_date adalah TEXT (format M/D/YYYY) jadi rentang tanggal difilter di JS
+  const startD = parseVisitDate(st);
+  const endD   = parseVisitDate(en);
+  const data = allData.filter(r => {
+    const d = parseVisitDate(r.checkin_date);
+    if (!d) return false;
+    if (startD && d < startD) return false;
+    if (endD && d > endD) return false;
+    return true;
+  });
 
   const headers = ['TANGGAL', 'OUTLET ID', 'NAMA OUTLET', 'FRONTLINER', 'RAYON', 'STATUS TOKO', 'STATUS PLANO'];
   const formattedData = data.map(r => [
-    r.tanggal, r.outlet_id, r.outlet_name, r.frontliner_name, r.rayon, r.status_toko, r.status_planogram
+    r.checkin_date, r.outlet_id, r.outlet_name, r.frontliner_name, r.rayon, r.status_toko, r.status_planogram
   ]);
   
   return { success: true, headers, data: formattedData, dataRaw: formattedData };
@@ -590,7 +638,7 @@ async function api_replaceDmpData(dmpUploadedData, currentIdTeamleader, currentI
     district: row[8], type_outlet: row[9], type_display: row[10], rayon: row[11], latlong: row[12]
   }));
   
-  const { error } = await supabaseClient.from('DMP').upsert(rowsToInsert, { onConflict: 'outlet_id' });
+  const { error } = await supabaseClient.from('dmp').upsert(rowsToInsert, { onConflict: 'outlet_id' });
   return error ? { success: false, message: error.message } : { success: true };
 }
 
