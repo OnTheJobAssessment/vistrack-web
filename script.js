@@ -6,7 +6,7 @@
  ******************************************************/
 const SUPABASE_URL = 'https://qzluybsuucqqoyetawjg.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF6bHV5YnN1dWNxcW95ZXRhd2pnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzIyOTQsImV4cCI6MjA5OTIwODI5NH0.u-SgQvCuBxVWkn6McoUfcPs5jV4F1r1Ots8hAGZkPww';
-const supabase = window.supabase.createClient(https://qzluybsuucqqoyetawjg.supabase.co, eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF6bHV5YnN1dWNxcW95ZXRhd2pnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzIyOTQsImV4cCI6MjA5OTIwODI5NH0.u-SgQvCuBxVWkn6McoUfcPs5jV4F1r1Ots8hAGZkPww);
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /******************************************************
  * CACHE CONFIG
