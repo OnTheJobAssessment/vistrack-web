@@ -327,10 +327,9 @@ async function callServer(fnName, args, onSuccess, opts) {
 
 // 2. SELURUH PANGGILAN API DI BAWAH INI MENGGUNAKAN supabaseClient
 async function api_verifyLogin(email, password) {
-  const passwordHash = await sha256(password.trim());
+  const inputPlain = password.trim();
+  const inputHash  = await sha256(inputPlain);
 
-  // maybeSingle() dipakai (bukan single()) supaya tidak melempar error keras
-  // kalau baris tidak ketemu atau ada duplikat email — kita tangani manual di bawah.
   const { data, error } = await supabaseClient
     .from('teamleaders')
     .select('*')
@@ -343,20 +342,24 @@ async function api_verifyLogin(email, password) {
   }
   if (!data) return { success: false, message: 'Email tidak ditemukan.' };
 
-  // Normalisasi kedua sisi (trim + lowercase) supaya hash tetap cocok
-  // walau ada spasi tersembunyi atau huruf besar/kecil berbeda saat hash
-  // di-input manual ke Supabase.
-  const storedHash   = String(data.password_hash || '').trim().toLowerCase();
-  const computedHash = passwordHash.trim().toLowerCase();
+  // Tabel `teamleaders` bisa punya salah satu dari dua kolom:
+  //  - password_hash  -> nilai SHA-256 (lebih aman, dipakai kalau ada)
+  //  - password        -> teks biasa (fallback, dipakai kalau password_hash tidak ada)
+  const storedHash  = data.password_hash ? String(data.password_hash).trim().toLowerCase() : '';
+  const storedPlain = data.password != null ? String(data.password).trim() : '';
 
-  if (!storedHash) {
-    console.error('[verifyLogin] Kolom password_hash kosong/null untuk email:', email);
+  let isValid = false;
+  if (storedHash) {
+    isValid = storedHash === inputHash.trim().toLowerCase();
+  } else if (storedPlain) {
+    isValid = storedPlain === inputPlain;
+  } else {
+    console.error('[verifyLogin] Tidak ada kolom password_hash maupun password untuk email:', email);
     return { success: false, message: 'Akun ini belum memiliki password. Hubungi admin.' };
   }
 
-  if (storedHash !== computedHash) {
-    // Log untuk debugging developer di console (tidak ditampilkan ke user)
-    console.warn('[verifyLogin] Hash tidak cocok.', { expected: storedHash, computed: computedHash });
+  if (!isValid) {
+    console.warn('[verifyLogin] Password tidak cocok untuk email:', email);
     return { success: false, message: 'Password salah.' };
   }
 
