@@ -644,7 +644,22 @@ async function api_replaceDmpData(dmpUploadedData, currentIdTeamleader, currentI
 
 async function api_resolveMultipleDriveImages(arr) {
   const results = {};
-  arr.forEach(item => { if (item.path) results[item.key] = item.path; });
+  arr.forEach(item => {
+    if (!item.path) return;
+
+    // Kalau kolom di DB sudah berisi URL penuh (http...), langsung pakai apa adanya
+    if (item.path.startsWith('http')) {
+      results[item.key] = item.path;
+      return;
+    }
+
+    // Kalau cuma path (misal: "checkin/abc123.jpg"), generate public URL
+    const { data } = supabaseClient.storage
+      .from('visit-photos')
+      .getPublicUrl(item.path);
+
+    if (data && data.publicUrl) results[item.key] = data.publicUrl;
+  });
   return results;
 }
 
