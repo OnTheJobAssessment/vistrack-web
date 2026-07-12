@@ -227,7 +227,7 @@ async function sha256(text) {
  * kolom password_hash di Supabase table `teamleaders`)
  *
  * Cara pakai: buka DevTools Console di halaman ini, lalu ketik:
- *   await generatePasswordHash('passwordAsli')
+ * await generatePasswordHash('passwordAsli')
  * Copy hasilnya (64 karakter hex) ke kolom password_hash
  * pada baris user yang sesuai di Supabase Table Editor.
  ******************************************************/
@@ -644,22 +644,34 @@ async function api_replaceDmpData(dmpUploadedData, currentIdTeamleader, currentI
 
 async function api_resolveMultipleDriveImages(arr) {
   const results = {};
+
+  // Pola umum Google Drive File ID: alfanumerik + - _, tanpa slash/titik, panjang 20+
+  const driveIdPattern = /^[a-zA-Z0-9_-]{20,}$/;
+
   arr.forEach(item => {
     if (!item.path) return;
+    const val = item.path.trim();
 
-    // Kalau kolom di DB sudah berisi URL penuh (http...), langsung pakai apa adanya
-    if (item.path.startsWith('http')) {
-      results[item.key] = item.path;
+    // 1. Sudah URL penuh -> pakai langsung
+    if (val.startsWith('http')) {
+      results[item.key] = val;
       return;
     }
 
-    // Kalau cuma path (misal: "checkin/abc123.jpg"), generate public URL
+    // 2. Terdeteksi sebagai Drive File ID (dari AppSheet)
+    if (driveIdPattern.test(val) && val.indexOf('/') === -1 && val.indexOf('.') === -1) {
+      // Thumbnail endpoint lebih stabil untuk hotlink dibanding uc?export=view
+      results[item.key] = 'https://drive.google.com/thumbnail?id=' + val + '&sz=w1000';
+      return;
+    }
+
+    // 3. Selain itu anggap path Supabase Storage
     const { data } = supabaseClient.storage
       .from('visit-photos')
-      .getPublicUrl(item.path);
-
+      .getPublicUrl(val);
     if (data && data.publicUrl) results[item.key] = data.publicUrl;
   });
+
   return results;
 }
 
@@ -3227,7 +3239,7 @@ const DownloadToast = (function () {
     const toast    = document.getElementById('dlToast'); const icon     = document.getElementById('dlToastIcon'); const iconI    = document.getElementById('dlToastIconInner'); const titleEl  = document.getElementById('dlToastTitle'); const descEl   = document.getElementById('dlToastDesc'); const fill     = document.getElementById('dlToastFill'); const pct      = document.getElementById('dlToastPct'); const cancel   = document.getElementById('dlToastCancel'); const done     = document.getElementById('dlToastDone');
     if (!toast) return;
     fill.style.width = '0%'; pct.textContent  = '0% selesai'; cancel.style.display = ''; done.style.display   = 'none';
-    if (_type === 'xlsx') { icon.className  = 'dl-toast-icon xlsx'; iconI.className = 'fa fa-file-excel'; fill.className  = 'dl-toast-fill xlsx-fill'; cancel.className = 'dl-toast-cancel xlsx-cancel'; done.className   = 'dl-toast-done-badge xlsx-done'; } else { icon.className  = 'dl-toast-icon pdf'; iconI.className = 'fa fa-file-pdf'; fill.className  = 'dl-toast-fill pdf-fill'; cancel.className = 'dl-toast-cancel pdf-cancel'; done.className   = 'dl-toast-done-badge pdf-done'; }
+    if (_type === 'xlsx') { icon.className  = 'dl-toast-icon xlsx'; iconI.className = 'fa fa-file-excel'; fill.className  = 'dl-toast-fill xlsx-fill'; cancel.className = 'dl-toast-cancel xlsx-cancel'; done.className  = 'dl-toast-done-badge xlsx-done'; } else { icon.className  = 'dl-toast-icon pdf'; iconI.className = 'fa fa-file-pdf'; fill.className  = 'dl-toast-fill pdf-fill'; cancel.className = 'dl-toast-cancel pdf-cancel'; done.className  = 'dl-toast-done-badge pdf-done'; }
     titleEl.textContent = title || 'Download'; descEl.textContent  = desc  || 'Memproses file...';
     toast.classList.add('show');
   }
@@ -3366,7 +3378,7 @@ function executeJEMDownload(flId, month, year, rayonPerDate, flName, periodStr) 
     if (DownloadToast.isCancelled()) return;
     if (!res || !res.success) { DownloadToast.hide(); Swal.fire({ icon: 'error', title: 'Gagal Generate JEM', text: res && res.message ? res.message : 'Tidak dapat membuat PDF', confirmButtonColor: '#2563EB' }); return; }
     try {
-      const byteChars = atob(res.data); const byteArr   = new Uint8Array(byteChars.length);
+      const byteChars = atob(res.data); const byteArr    = new Uint8Array(byteChars.length);
       for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
       const blob = new Blob([byteArr], { type: 'application/pdf' }); const url  = URL.createObjectURL(blob); const a    = document.createElement('a');
       a.href = url; a.download = res.filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
