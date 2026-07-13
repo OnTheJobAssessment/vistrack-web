@@ -17,6 +17,9 @@ const MASTER_CACHE_KEY    = 'vistrack_master_data';
 const MASTER_CACHE_EXPIRY = 15 * 60 * 1000; // 15 menit
 
 function saveMasterCache(fl, dmp) {
+  // Fix: Jangan cache kalau data kosong (hanya array kosong atau hanya 1 baris header)
+  if (!fl || fl.length <= 1 || !dmp || dmp.length <= 1) return;
+  
   try {
     sessionStorage.setItem(MASTER_CACHE_KEY, JSON.stringify({
       fl:        fl,
@@ -466,23 +469,72 @@ async function api_getDashboardData(frontlinerName, filterDate, idTeamleader, is
 }
 
 async function api_getMasterDataList(idTeamleader, isSuperuser) {
-  let flQuery = supabaseClient.from('frontliners').select('*');
-  if (!isSuperuser) flQuery = flQuery.eq('id_teamleader', idTeamleader);
-  const { data: flData } = await flQuery;
+  const flMap = {}; // key: id_frontliner -> data lengkap
 
-  const flArray = [['HEADER', 'ID', 'Name', 'Position', 'Area', 'ID TL', 'TL Name', 'Email']];
-  (flData || []).forEach(r => {
-    flArray.push(['', r.id_frontliner, r.name, r.position, r.area, r.id_teamleader, r.tl_name, r.email]);
+  // 1. Ambil daftar frontliner unik dari data_visit (sumber utama, sesuai kunjungan riil)
+  let visitQuery = supabaseClient
+    .from('data_visit')
+    .select('id_frontliner, frontliner_name, id_teamleader, teamleader_name, position, area');
+  if (!isSuperuser) visitQuery = visitQuery.eq('id_teamleader', idTeamleader);
+
+  const { data: visitData, error: visitError } = await visitQuery;
+  if (visitError) console.error('[getMasterDataList] data_visit error:', visitError);
+
+  (visitData || []).forEach(r => {
+    const id = (r.id_frontliner || '').toString().trim();
+    if (!id) return;
+    if (!flMap[id]) {
+      flMap[id] = {
+        id_frontliner: id,
+        name: r.frontliner_name || id,
+        position: r.position || '',
+        area: r.area || '',
+        id_teamleader: r.id_teamleader || '',
+        tl_name: r.teamleader_name || '',
+        email: ''
+      };
+    }
   });
 
+  // 2. Lengkapi dari tabel frontliners (master) — timpa/lengkapi email & data yang belum ada
+  let flQuery = supabaseClient.from('frontliners').select('*');
+  if (!isSuperuser) flQuery = flQuery.eq('id_teamleader', idTeamleader);
+  const { data: flData, error: flError } = await flQuery;
+  if (flError) console.error('[getMasterDataList] frontliners error:', flError);
+
+  (flData || []).forEach(r => {
+    const id = (r.id_frontliner || '').toString().trim();
+    if (!id) return;
+    flMap[id] = {
+      id_frontliner: id,
+      name: r.name || (flMap[id] ? flMap[id].name : id),
+      position: r.position || (flMap[id] ? flMap[id].position : ''),
+      area: r.area || (flMap[id] ? flMap[id].area : ''),
+      id_teamleader: r.id_teamleader || (flMap[id] ? flMap[id].id_teamleader : ''),
+      tl_name: r.tl_name || (flMap[id] ? flMap[id].tl_name : ''),
+      email: r.email || ''
+    };
+  });
+
+  const flArray = [['HEADER', 'ID', 'Name', 'Position', 'Area', 'ID TL', 'TL Name', 'Email']];
+  Object.values(flMap)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .forEach(r => {
+      flArray.push(['', r.id_frontliner, r.name, r.position, r.area, r.id_teamleader, r.tl_name, r.email]);
+    });
+
+  console.log('[getMasterDataList] total frontliner unik:', flArray.length - 1);
+
+  // ── DMP tetap sama ──
   let dmpQuery = supabaseClient.from('dmp').select('*');
   if (!isSuperuser) dmpQuery = dmpQuery.eq('id_teamleader', idTeamleader);
-  const { data: dmpData } = await dmpQuery;
+  const { data: dmpData, error: dmpError } = await dmpQuery;
+  if (dmpError) console.error('[getMasterDataList] dmp error:', dmpError);
 
   const dmpArray = [['H0', 'H1', 'outlet_id', 'area', 'outlet_name', 'outlet_address', 'province', 'city', 'district', 'type_outlet', 'type_display', 'rayon', 'latlong']];
   (dmpData || []).forEach(r => {
     dmpArray.push([
-      r.id_frontliner, r.id_teamleader, r.outlet_id, r.area, r.outlet_name, r.outlet_address, 
+      r.id_frontliner, r.id_teamleader, r.outlet_id, r.area, r.outlet_name, r.outlet_address,
       r.province, r.city, r.district, r.type_outlet, r.type_display, r.rayon, r.latlong
     ]);
   });
